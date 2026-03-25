@@ -4,11 +4,28 @@ import CodexBarCore
 @MainActor
 extension StatusItemController {
     func runAntigravityLoginFlow() async -> Bool {
-        self.loginPhase = .waitingBrowser
+        if let configurationError = AntigravityOAuthConfig.configurationErrorMessage() {
+            self.loginPhase = .idle
+            self.presentLoginAlert(title: "Login Error", message: configurationError)
+            return false
+        }
 
         let port: UInt16 = 19876
         let redirectURI = "http://127.0.0.1:\(port)/callback"
         let state = UUID().uuidString
+        let listener: AntigravityOAuthCallbackServer.PreparedCallbackListener
+
+        do {
+            listener = try AntigravityOAuthCallbackServer.prepareListener(port: port)
+        } catch {
+            self.loginPhase = .idle
+            self.presentLoginAlert(
+                title: "Login Error",
+                message: error.localizedDescription)
+            return false
+        }
+
+        self.loginPhase = .waitingBrowser
 
         let clientId = AntigravityOAuthConfig.clientId
         let scopes = [
@@ -28,16 +45,22 @@ extension StatusItemController {
         ]
 
         guard let authURL = components.url else {
+            close(listener.serverFD)
             self.loginPhase = .idle
             self.presentLoginAlert(title: "Login Error", message: "Failed to build auth URL.")
             return false
         }
 
-        NSWorkspace.shared.open(authURL)
+        guard NSWorkspace.shared.open(authURL) else {
+            close(listener.serverFD)
+            self.loginPhase = .idle
+            self.presentLoginAlert(title: "Login Error", message: "Failed to open Google sign-in page.")
+            return false
+        }
 
         do {
             let tokens = try await AntigravityOAuthCallbackServer.waitForCallback(
-                port: port, expectedState: state, timeout: 120)
+                listener: listener, expectedState: state, timeout: 120)
             let storage = AntigravityOAuthStorage()
             try storage.saveTokens(tokens)
             await AntigravitySessionState.setPreferRemote(true)

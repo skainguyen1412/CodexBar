@@ -26,6 +26,11 @@ enum AntigravityOAuthCallbackServer {
         let code: String
     }
 
+    struct PreparedCallbackListener {
+        let serverFD: Int32
+        let port: UInt16
+    }
+
     private enum CallbackConnectionOutcome {
         case readyForExchange(PendingCallbackSuccess)
         case retryableFailure(message: String)
@@ -38,8 +43,14 @@ enum AntigravityOAuthCallbackServer {
         expectedState: String,
         timeout: TimeInterval) async throws -> AntigravityOAuthTokens
     {
-        let redirectURI = "http://127.0.0.1:\(port)/callback"
+        let listener = try self.prepareListener(port: port)
+        return try await self.waitForCallback(
+            listener: listener,
+            expectedState: expectedState,
+            timeout: timeout)
+    }
 
+    static func prepareListener(port: UInt16) throws -> PreparedCallbackListener {
         // Create a socket listener
         let serverFD = socket(AF_INET, SOCK_STREAM, 0)
         guard serverFD >= 0 else {
@@ -66,9 +77,25 @@ enum AntigravityOAuthCallbackServer {
             throw AntigravityOAuthError.authenticationFailed("Failed to bind to port \(port)")
         }
 
-        listen(serverFD, 1)
+        guard listen(serverFD, 1) == 0 else {
+            let errnoCode = errno
+            close(serverFD)
+            throw AntigravityOAuthError.authenticationFailed(
+                "Failed to listen on port \(port) (errno: \(errnoCode))")
+        }
 
-        self.log.info("OAuth callback server listening on port \(port)")
+        return PreparedCallbackListener(serverFD: serverFD, port: port)
+    }
+
+    static func waitForCallback(
+        listener: PreparedCallbackListener,
+        expectedState: String,
+        timeout: TimeInterval) async throws -> AntigravityOAuthTokens
+    {
+        let redirectURI = "http://127.0.0.1:\(listener.port)/callback"
+        let serverFD = listener.serverFD
+
+        self.log.info("OAuth callback server listening on port \(listener.port)")
 
         let deadline = Date().addingTimeInterval(timeout)
         let pendingCallback: PendingCallbackSuccess = try await withCheckedThrowingContinuation { continuation in

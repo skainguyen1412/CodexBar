@@ -176,6 +176,37 @@ struct AntigravityOAuthCallbackServerTests {
         #expect(tokens.email == "user@example.com")
     }
 
+    @Test
+    func `prepareListener fails when port is already in use`() throws {
+        let port = try self.makeAvailablePort()
+        let occupiedFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard occupiedFD >= 0 else {
+            throw POSIXError(.EIO)
+        }
+        defer { close(occupiedFD) }
+
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = CFSwapInt16HostToBig(port)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                bind(occupiedFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindResult == 0 else {
+            throw POSIXError(.EADDRINUSE)
+        }
+
+        listen(occupiedFD, 1)
+
+        #expect(throws: AntigravityOAuthError.self) {
+            let listener = try AntigravityOAuthCallbackServer.prepareListener(port: port)
+            close(listener.serverFD)
+        }
+    }
+
     private func fetchLocalBody(path: String) async throws -> String {
         let url = try #require(URL(string: path))
         var lastError: Error?

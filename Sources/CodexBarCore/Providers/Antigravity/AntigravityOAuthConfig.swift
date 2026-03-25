@@ -20,4 +20,29 @@ public enum AntigravityOAuthConfig: Sendable {
         ProcessInfo.processInfo.environment["ANTIGRAVITY_OAUTH_CLIENT_SECRET"]
             ?? "REPLACE_WITH_OAUTH_CLIENT_SECRET"
     }
+
+    public static func configurationErrorMessage(
+        clientId: String = Self.clientId,
+        clientSecret: String = Self.clientSecret) -> String?
+    {
+        let trimmedClientId = clientId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedClientSecret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedClientId.isEmpty,
+              !trimmedClientSecret.isEmpty,
+              !Self.isPlaceholder(trimmedClientId),
+              !Self.isPlaceholder(trimmedClientSecret)
+        else {
+            return """
+            Antigravity OAuth is not configured. Set ANTIGRAVITY_OAUTH_CLIENT_ID and \
+            ANTIGRAVITY_OAUTH_CLIENT_SECRET before using Switch Account.
+            """
+        }
+
+        return nil
+    }
+
+    private static func isPlaceholder(_ value: String) -> Bool {
+        value.hasPrefix("REPLACE_WITH_")
+    }
 }
